@@ -1,5 +1,26 @@
-template-repository (1.0-1) unstable; urgency=medium
+golang-github-checkpoint-restore-checkpointctl (1.2.1+ds1-4) unstable; urgency=medium
 
-  * Initial release
+  * Upload to unstable
 
- -- Tsic404 <liuheng@deepin.org>  Sat, 28 Jan 2023 13:46:49 +0800
+ -- Reinhard Tartler <siretart@tauware.de>  Sat, 17 Aug 2024 07:07:13 -0400
+
+golang-github-checkpoint-restore-checkpointctl (1.2.1+ds1-3) experimental; urgency=medium
+
+  * New upstream release
+  * Bump Standards version
+  * tighten dependency on go-criu >> 7.1
+  * build against golang-github-xlab-treeprint-dev (>> 1.2)
+
+ -- Reinhard Tartler <siretart@tauware.de>  Tue, 06 Aug 2024 20:14:57 -0400
+
+golang-github-checkpoint-restore-checkpointctl (0.1.0+ds1-2) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Reinhard Tartler <siretart@tauware.de>  Tue, 24 Oct 2023 18:11:23 -0400
+
+golang-github-checkpoint-restore-checkpointctl (0.1.0+ds1-1) experimental; urgency=medium
+
+  * Initial release (Closes: #1054273)
+
+ -- Reinhard Tartler <siretart@tauware.de>  Mon, 23 Oct 2023 08:21:20 -0400
