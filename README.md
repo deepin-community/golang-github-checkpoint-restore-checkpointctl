@@ -1,11 +1,14 @@
 <!-- markdownlint-disable MD033 -->
 <!-- markdownlint-disable MD041 -->
-<p1 align="center"><img src="docs/checkpointctl.svg" height="250"></p>
+<p1 align="center">
+    <img src="docs/checkpointctl.svg" height="250" alt="checkpointctl logo">
+</p>
 
 <!-- markdownlint-disable MD013 -->
 # checkpointctl - a tool for in-depth analysis of container checkpoints
 
 [![Run Tests](https://github.com/checkpoint-restore/checkpointctl/actions/workflows/tests.yml/badge.svg)](https://github.com/checkpoint-restore/checkpointctl/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/checkpoint-restore/checkpointctl/graph/badge.svg?token=P1SXZ8HZ32)](https://codecov.io/gh/checkpoint-restore/checkpointctl)
 
 Container engines like *Podman* and *CRI-O* have the ability to checkpoint a
 container.  All data related to a checkpoint is collected in a checkpoint
@@ -52,7 +55,7 @@ $ checkpointctl show /var/lib/kubelet/checkpoints/checkpoint-counters_default-co
 To retrieve low-level information about a container checkpoint, use the `checkpointctl inspect` command:
 
 ```console
-$ checkpointctl inspect /tmp/ubuntu_looper.tar.gz --ps-tree
+$ checkpointctl inspect /tmp/ubuntu_looper.tar.gz --ps-tree --metadata
 
 awesome_booth
 ├── Image: docker.io/library/ubuntu:latest
@@ -62,6 +65,10 @@ awesome_booth
 ├── Engine: Podman
 ├── Checkpoint size: 2.8 MiB
 ├── Root FS diff size: 309.0 KiB
+├── Metadata
+│   └── Annotations
+│       ├── io.container.manager: libpod
+│       └── org.opencontainers.image.stopSignal: 15
 └── Process tree
     └── [1]  bash
         └── [5]  su
