@@ -7,9 +7,8 @@ Priority: optional
 Build-Depends: debhelper-compat (= 13),
                dh-golang,
                golang-any,
-               golang-github-checkpoint-restore-go-criu-dev (>> 7.1),
+               golang-github-checkpoint-restore-go-criu-dev (>> 7.2),
                golang-github-containers-storage-dev,
-               golang-github-olekukonko-tablewriter-dev,
                golang-github-opencontainers-specs-dev,
                golang-github-spf13-cobra-dev,
                golang-github-ulikunitz-xz-dev,
@@ -24,9 +23,8 @@ XS-Go-Import-Path: github.com/checkpoint-restore/checkpointctl
 Package: golang-github-checkpoint-restore-checkpointctl-dev
 Architecture: all
 Multi-Arch: foreign
-Depends: golang-github-checkpoint-restore-go-criu-dev (>> 7.1),
+Depends: golang-github-checkpoint-restore-go-criu-dev (>> 7.2),
          golang-github-containers-storage-dev,
-         golang-github-olekukonko-tablewriter-dev,
          golang-github-opencontainers-specs-dev,
          golang-github-spf13-cobra-dev,
          golang-github-ulikunitz-xz-dev,

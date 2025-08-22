@@ -1,0 +1,484 @@
+From: Adrian Reber <areber@redhat.com>
+Date: Sat, 2 Aug 2025 13:08:20 +0000
+Subject: Replace olekukonko/tablewriter with text/tabwriter
+
+Drop external tablewriter dependency in favor of Go's built-in text/tabwriter
+package to reduce dependencies and simplify maintenance.
+
+Changes:
+- Replace tablewriter.NewWriter() with tabwriter.NewWriter() in all table
+  display functions
+- Update table formatting logic to use tab-separated output with headers
+  and separator lines
+- Remove olekukonko/tablewriter and related dependencies from go.mod
+- Update test expectations to match new table output format
+- Fix test line number references after table format changes
+
+All tests pass with the new implementation.
+
+Assisted-by: Claude AI for dependency replacement and test updates
+Signed-off-by: Adrian Reber <areber@redhat.com>
+Signed-off-by: Radostin Stoyanov <rstoyano@redhat.com>
+---
+ README.md               | 36 +++++++++++++++++-----------------
+ cmd/list.go             | 14 +++++++-------
+ cmd/memparse.go         | 50 +++++++++++++++++++++++++-----------------------
+ internal/container.go   | 15 ++++++++-------
+ internal/utils.go       | 51 +++++++++++++++++++++++++++++++++++++++++++++++++
+ test/checkpointctl.bats | 30 +++++++++++++++++------------
+ 6 files changed, 127 insertions(+), 69 deletions(-)
+
+diff --git a/README.md b/README.md
+index 9c4320f..99b2a98 100644
+--- a/README.md
++++ b/README.md
+@@ -30,24 +30,25 @@ To display an overview of a checkpoint archive you can just use
+ ```console
+ $ checkpointctl show /tmp/dump.tar
+ 
+-+-----------------+------------------------------------------+--------------+---------+----------------------+--------+------------+-------------------+
+-|    CONTAINER    |                  IMAGE                   |      ID      | RUNTIME |       CREATED        | ENGINE | CHKPT SIZE | ROOT FS DIFF SIZE |
+-+-----------------+------------------------------------------+--------------+---------+----------------------+--------+------------+-------------------+
+-| magical_murdock | quay.io/adrianreber/wildfly-hello:latest | f11d11844af0 | crun    | 2023-02-28T09:43:52Z | Podman | 338.2 MiB  | 177.0 KiB         |
+-+-----------------+------------------------------------------+--------------+---------+----------------------+--------+------------+-------------------+
++Displaying container checkpoint data from /root/dump.tar
++
++CONTAINER  IMAGE                             ID            RUNTIME  CREATED               ENGINE  CHKPT SIZE ROOT FS DIFF SIZE
++---------  -----                             --            -------  -------               ------  ---------- -----------------
++looper     docker.io/library/busybox:latest  8b5c2ca15082  crun     2021-09-28T10:03:56Z  Podman  130.8 KiB  204 B
+ ```
+ 
+ For a checkpoint archive created by Kubernetes with *CRI-O* the output would
+ look like this:
+ 
+ ```console
+-$ checkpointctl show /var/lib/kubelet/checkpoints/checkpoint-counters_default-counter-2023-02-13T16\:20\:09Z.tar
++$ checkpointctl show /var/lib/kubelet/checkpoints/checkpoint-counters_default-counter-2025-05-22T14\:31\:35Z.tar
++
++Displaying container checkpoint data from /var/lib/kubelet/checkpoints/checkpoint-counters_default-counter-2025-05-22T14:31:35Z.tar
++
++CONTAINER  IMAGE                               ID            RUNTIME  CREATED                         ENGINE  IP         CHKPT SIZE  ROOT FS DIFF SIZE
++---------  -----                               --            -------  -------                         ------  --         ----------  -----------------
++counter    quay.io/adrianreber/counter:latest  29ed106ef467  runc     2025-05-22T14:31:24.818422898Z  CRI-O   10.0.0.70  9.2 MiB     2.0 KiB
+ 
+-+-----------+------------------------------------+--------------+---------+--------------------------------+--------+------------+------------+
+-| CONTAINER |               IMAGE                |      ID      | RUNTIME |            CREATED             | ENGINE |     IP     | CHKPT SIZE |
+-+-----------+------------------------------------+--------------+---------+--------------------------------+--------+------------+------------+
+-| counter   | quay.io/adrianreber/counter:latest | 7eb9680287f1 | runc    | 2023-02-13T16:12:25.843774934Z | CRI-O  | 10.88.0.24 | 8.5 MiB    |
+-+-----------+------------------------------------+--------------+---------+--------------------------------+--------+------------+------------+
+ ```
+ 
+ ### `inspect` sub-command
+@@ -88,7 +89,7 @@ $ checkpointctl memparse /tmp/jira.tar.gz  --pid=1 | less
+ 
+ Displaying memory pages content for Process ID 1 from checkpoint: /tmp/jira.tar.gz
+ 
+-Address           Hexadecimal                                       ASCII
++ADDRESS           HEXADECIMAL                                       ASCII
+ -------------------------------------------------------------------------------------
+ 00005633bb080000  f3 0f 1e fa 48 83 ec 08 48 8b 05 d1 4f 00 00 48  |....H...H...O..H|
+ 00005633bb080010  85 c0 74 02 ff d0 48 83 c4 08 c3 00 00 00 00 00  |..t...H.........|
+@@ -145,13 +146,10 @@ $ sudo checkpointctl memparse /tmp/jira.tar.gz
+ 
+ Displaying processes memory sizes from /tmp/jira.tar.gz
+ 
+-+-----+--------------+-------------+
+-| PID | PROCESS NAME | MEMORY SIZE |
+-+-----+--------------+-------------+
+-|   1 | tini         | 100.0 KiB   |
+-+-----+--------------+-------------+
+-|   2 | java         | 553.5 MiB   |
+-+-----+--------------+-------------+
++PID  PROCESS NAME  MEMORY SIZE  SHARED MEMORY SIZE
++---  ------------  -----------  ------------------
++1    tini          100.0 KiB    0 B
++2    java          553.5 MiB    0 B
+ ```
+ 
+ In this example, given the large size of the java process, it is better to write its output to a file.
+diff --git a/cmd/list.go b/cmd/list.go
+index a562a54..f3f280c 100644
+--- a/cmd/list.go
++++ b/cmd/list.go
+@@ -12,7 +12,6 @@ import (
+ 	"time"
+ 
+ 	"github.com/checkpoint-restore/checkpointctl/internal"
+-	"github.com/olekukonko/tablewriter"
+ 	"github.com/spf13/cobra"
+ )
+ 
+@@ -38,7 +37,7 @@ func list(cmd *cobra.Command, args []string) error {
+ 	}()
+ 	showTable := false
+ 
+-	table := tablewriter.NewWriter(os.Stdout)
++	w := internal.GetNewTabWriter(os.Stdout)
+ 	header := []string{
+ 		"Namespace",
+ 		"Pod",
+@@ -48,9 +47,7 @@ func list(cmd *cobra.Command, args []string) error {
+ 		"Checkpoint Name",
+ 	}
+ 
+-	table.SetHeader(header)
+-	table.SetAutoMergeCells(false)
+-	table.SetRowLine(true)
++	var rows [][]string
+ 
+ 	for _, checkpointPath := range allPaths {
+ 		files, err := filepath.Glob(filepath.Join(checkpointPath, "checkpoint-*"))
+@@ -81,7 +78,7 @@ func list(cmd *cobra.Command, args []string) error {
+ 				filepath.Base(file),
+ 			}
+ 
+-			table.Append(row)
++			rows = append(rows, row)
+ 		}
+ 	}
+ 
+@@ -90,6 +87,9 @@ func list(cmd *cobra.Command, args []string) error {
+ 		return nil
+ 	}
+ 
+-	table.Render()
++	internal.WriteTableHeader(w, header)
++	internal.WriteTableRows(w, rows)
++
++	w.Flush()
+ 	return nil
+ }
+diff --git a/cmd/memparse.go b/cmd/memparse.go
+index 8f69ec1..51c85fb 100644
+--- a/cmd/memparse.go
++++ b/cmd/memparse.go
+@@ -14,7 +14,6 @@ import (
+ 	"github.com/checkpoint-restore/checkpointctl/internal"
+ 	metadata "github.com/checkpoint-restore/checkpointctl/lib"
+ 	"github.com/checkpoint-restore/go-criu/v7/crit"
+-	"github.com/olekukonko/tablewriter"
+ 	"github.com/spf13/cobra"
+ )
+ 
+@@ -116,21 +115,16 @@ func memparse(cmd *cobra.Command, args []string) error {
+ 
+ // Display processes memory sizes within the given container checkpoints.
+ func showProcessMemorySizeTables(tasks []internal.Task) error {
+-	// Initialize the table
+-	table := tablewriter.NewWriter(os.Stdout)
+ 	header := []string{
+ 		"PID",
+ 		"Process name",
+ 		"Memory size",
+ 		"Shared memory size",
+ 	}
+-	table.SetHeader(header)
+-	table.SetAutoMergeCells(false)
+-	table.SetRowLine(true)
+ 
+ 	// Function to recursively traverse the process tree and populate the table rows
+-	var traverseTree func(*crit.PsTree, string) error
+-	traverseTree = func(root *crit.PsTree, checkpointOutputDir string) error {
++	var traverseTree func(*crit.PsTree, string, *[][]string) error
++	traverseTree = func(root *crit.PsTree, checkpointOutputDir string, rows *[][]string) error {
+ 		memReader, err := crit.NewMemoryReader(
+ 			filepath.Join(checkpointOutputDir, metadata.CheckpointDirectory),
+ 			root.PID, pageSize,
+@@ -152,15 +146,16 @@ func showProcessMemorySizeTables(tasks []internal.Task) error {
+ 			return err
+ 		}
+ 
+-		table.Append([]string{
++		row := []string{
+ 			fmt.Sprintf("%d", root.PID),
+ 			root.Comm,
+ 			metadata.ByteToString(memSize),
+ 			metadata.ByteToString(shmemSize),
+-		})
++		}
++		*rows = append(*rows, row)
+ 
+ 		for _, child := range root.Children {
+-			if err := traverseTree(child, checkpointOutputDir); err != nil {
++			if err := traverseTree(child, checkpointOutputDir, rows); err != nil {
+ 				return err
+ 			}
+ 		}
+@@ -168,8 +163,8 @@ func showProcessMemorySizeTables(tasks []internal.Task) error {
+ 	}
+ 
+ 	for _, task := range tasks {
+-		// Clear the table before processing each checkpoint task
+-		table.ClearRows()
++		w := internal.GetNewTabWriter(os.Stdout)
++		var rows [][]string
+ 
+ 		c := crit.New(nil, nil, filepath.Join(task.OutputDir, "checkpoint"), false, false)
+ 		psTree, err := c.ExplorePs()
+@@ -178,12 +173,16 @@ func showProcessMemorySizeTables(tasks []internal.Task) error {
+ 		}
+ 
+ 		// Populate the table rows
+-		if err := traverseTree(psTree, task.OutputDir); err != nil {
++		if err := traverseTree(psTree, task.OutputDir, &rows); err != nil {
+ 			return err
+ 		}
+ 
+ 		fmt.Printf("\nDisplaying processes memory sizes from %s\n\n", task.CheckpointFilePath)
+-		table.Render()
++
++		internal.WriteTableHeader(w, header)
++		internal.WriteTableRows(w, rows)
++
++		w.Flush()
+ 	}
+ 
+ 	return nil
+@@ -348,21 +347,24 @@ func printMemorySearchResultForPID(task internal.Task) error {
+ 		return nil
+ 	}
+ 
+-	table := tablewriter.NewWriter(os.Stdout)
+-	table.SetHeader([]string{"Address", "Match", "Instance"})
+-	table.SetAutoMergeCells(false)
+-	table.SetRowLine(true)
++	w := internal.GetNewTabWriter(os.Stdout)
++	header := []string{"Address", "Match", "Instance"}
+ 
++	internal.WriteTableHeader(w, header)
++
++	// Build rows
++	var rows [][]string
+ 	for i, result := range results {
+-		table.Append([]string{
+-			fmt.Sprintf(
+-				"%016x", result.Vaddr),
++		row := []string{
++			fmt.Sprintf("%016x", result.Vaddr),
+ 			result.Match,
+ 			fmt.Sprintf("%d", i+1),
+-		})
++		}
++		rows = append(rows, row)
+ 	}
+ 
+-	table.Render()
++	internal.WriteTableRows(w, rows)
+ 
++	w.Flush()
+ 	return nil
+ }
+diff --git a/internal/container.go b/internal/container.go
+index 791785d..ace2e56 100644
+--- a/internal/container.go
++++ b/internal/container.go
+@@ -18,7 +18,6 @@ import (
+ 	metadata "github.com/checkpoint-restore/checkpointctl/lib"
+ 	"github.com/checkpoint-restore/go-criu/v7/crit"
+ 	"github.com/containers/storage/pkg/archive"
+-	"github.com/olekukonko/tablewriter"
+ 	spec "github.com/opencontainers/runtime-spec/specs-go"
+ )
+ 
+@@ -107,7 +106,8 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
+ }
+ 
+ func ShowContainerCheckpoints(tasks []Task) error {
+-	table := tablewriter.NewWriter(os.Stdout)
++	w := GetNewTabWriter(os.Stdout)
++
+ 	header := []string{
+ 		"Container",
+ 		"Image",
+@@ -121,6 +121,8 @@ func ShowContainerCheckpoints(tasks []Task) error {
+ 		header = append(header, "IP", "MAC", "CHKPT Size", "Root Fs Diff Size")
+ 	}
+ 
++	var rows [][]string
++
+ 	for _, task := range tasks {
+ 		info, err := getCheckpointInfo(task)
+ 		if err != nil {
+@@ -167,14 +169,13 @@ func ShowContainerCheckpoints(tasks []Task) error {
+ 			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+ 		}
+ 
+-		table.Append(row)
++		rows = append(rows, row)
+ 	}
+ 
+-	table.SetHeader(header)
+-	table.SetAutoMergeCells(false)
+-	table.SetRowLine(true)
+-	table.Render()
++	WriteTableHeader(w, header)
++	WriteTableRows(w, rows)
+ 
++	w.Flush()
+ 	return nil
+ }
+ 
+diff --git a/internal/utils.go b/internal/utils.go
+index fc70d9b..1aeb779 100644
+--- a/internal/utils.go
++++ b/internal/utils.go
+@@ -2,8 +2,10 @@ package internal
+ 
+ import (
+ 	"fmt"
++	"io"
+ 	"os"
+ 	"strings"
++	"text/tabwriter"
+ 	"time"
+ 
+ 	metadata "github.com/checkpoint-restore/checkpointctl/lib"
+@@ -82,3 +84,52 @@ func CleanupTasks(tasks []Task) {
+ 		}
+ 	}
+ }
++
++// Constant values are based on kubectl's tabwriter settings:
++// https://github.com/kubernetes/cli-runtime/blob/master/pkg/printers/tabwriter.go
++const (
++	tabwriterMinWidth = 6
++	tabwriterWidth    = 4
++	tabwriterPadding  = 3
++	tabwriterPadChar  = ' '
++	tabwriterFlags    = 0
++)
++
++// GetNewTabWriter returns a tabwriter that translates tabbed columns in input into properly aligned text.
++func GetNewTabWriter(output io.Writer) *tabwriter.Writer {
++	return tabwriter.NewWriter(output, tabwriterMinWidth, tabwriterWidth, tabwriterPadding, tabwriterPadChar, tabwriterFlags)
++}
++
++// WriteTableHeader writes the header row and separator line for a table
++func WriteTableHeader(w *tabwriter.Writer, header []string) {
++	// Print header
++	for i, h := range header {
++		if i > 0 {
++			fmt.Fprint(w, "\t")
++		}
++		fmt.Fprint(w, strings.ToUpper(h))
++	}
++	fmt.Fprintln(w)
++
++	// Print separator line
++	for i := range header {
++		if i > 0 {
++			fmt.Fprint(w, "\t")
++		}
++		fmt.Fprint(w, strings.Repeat("-", len(header[i])))
++	}
++	fmt.Fprintln(w)
++}
++
++// WriteTableRows writes the data rows for a table
++func WriteTableRows(w *tabwriter.Writer, rows [][]string) {
++	for _, row := range rows {
++		for i, cell := range row {
++			if i > 0 {
++				fmt.Fprint(w, "\t")
++			}
++			fmt.Fprint(w, cell)
++		}
++		fmt.Fprintln(w)
++	}
++}
+diff --git a/test/checkpointctl.bats b/test/checkpointctl.bats
+index 9f3fe15..ca43641 100644
+--- a/test/checkpointctl.bats
++++ b/test/checkpointctl.bats
+@@ -92,7 +92,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test.tar . )
+ 	checkpointctl show "$TEST_TMP_DIR2"/test.tar
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[4]} == *"Podman"* ]]
++	[[ ${lines[3]} == *"Podman"* ]]
+ }
+ 
+ @test "Run checkpointctl show with tar file from containerd with valid config.dump and valid spec.dump and checkpoint directory" {
+@@ -102,7 +102,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test.tar . )
+ 	checkpointctl show "$TEST_TMP_DIR2"/test.tar
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[4]} == *"containerd"* ]]
++	[[ ${lines[3]} == *"containerd"* ]]
+ }
+ 
+ @test "Run checkpointctl show with tar file with valid config.dump and valid spec.dump (CRI-O) and no checkpoint directory" {
+@@ -121,7 +121,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test.tar . )
+ 	checkpointctl show "$TEST_TMP_DIR2"/test.tar
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[4]} == *"CRI-O"* ]]
++	[[ ${lines[3]} == *"CRI-O"* ]]
+ }
+ 
+ @test "Run checkpointctl show with tar file compressed" {
+@@ -131,7 +131,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar czf "$TEST_TMP_DIR2"/test.tar.gz . )
+ 	checkpointctl show "$TEST_TMP_DIR2"/test.tar.gz
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[4]} == *"Podman"* ]]
++	[[ ${lines[3]} == *"Podman"* ]]
+ }
+ 
+ @test "Run checkpointctl show with tar file corrupted" {
+@@ -165,7 +165,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test.tar . )
+ 	checkpointctl show "$TEST_TMP_DIR2"/test.tar
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[2]} == *"ROOT FS DIFF SIZE"* ]]
++	[[ ${lines[1]} == *"ROOT FS DIFF SIZE"* ]]
+ }
+ 
+ @test "Run checkpointctl show with multiple tar files" {
+@@ -175,8 +175,8 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test1.tar .  && tar cf "$TEST_TMP_DIR2"/test2.tar . )
+ 	checkpointctl show "$TEST_TMP_DIR2"/*.tar
+ 	[ "$status" -eq 0 ]
++	[[ ${lines[2]} == *"Podman"* ]]
+ 	[[ ${lines[3]} == *"Podman"* ]]
+-	[[ ${lines[5]} == *"Podman"* ]]
+ }
+ 
+ @test "Run checkpointctl inspect with invalid format" {
+@@ -546,7 +546,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test.tar . )
+ 	checkpointctl memparse "$TEST_TMP_DIR2"/test.tar
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[4]} == *"piggie"* ]]
++	[[ ${lines[3]} == *"piggie"* ]]
+ }
+ 
+ @test "Run checkpointctl memparse with tar file and missing pstree.img" {
+@@ -644,7 +644,7 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/test.tar . )
+ 	checkpointctl memparse --search-regex='HOME=([^?]+)' "$TEST_TMP_DIR2"/test.tar --pid=1
+ 	[ "$status" -eq 0 ]
+-	[[ ${lines[3]} == *"HOME"* ]]
++	[[ ${lines[2]} == *"HOME"* ]]
+ }
+ 
+ @test "Run checkpointctl memparse with tar file and invalid PID" {
+@@ -763,8 +763,14 @@ function teardown() {
+ 	( cd "$TEST_TMP_DIR1" && tar cf "$TEST_TMP_DIR2"/checkpoint-valid-config-modified.tar . )
+ 	checkpointctl list "$TEST_TMP_DIR2"
+ 	[ "$status" -eq 0 ]
+-	[[ "${lines[4]}" == *"| default   | modified-pod-name | container-name | CRI-O  |"* ]]
+-	[[ "${lines[4]}" == *"| checkpoint-valid-config-modified.tar |"* ]]
+-	[[ "${lines[6]}" == *"| default   | pod-name          | container-name | CRI-O  |"* ]]
+-	[[ "${lines[6]}" == *"| checkpoint-valid-config.tar          |"* ]]
++	[[ "${lines[3]}" == *"default"* ]]
++	[[ "${lines[3]}" == *"modified-pod-name"* ]]
++	[[ "${lines[3]}" == *"container-name"* ]]
++	[[ "${lines[3]}" == *"CRI-O"* ]]
++	[[ "${lines[3]}" == *"checkpoint-valid-config-modified.tar"* ]]
++	[[ "${lines[4]}" == *"default"* ]]
++	[[ "${lines[4]}" == *"pod-name"* ]]
++	[[ "${lines[4]}" == *"container-name"* ]]
++	[[ "${lines[4]}" == *"CRI-O"* ]]
++	[[ "${lines[4]}" == *"checkpoint-valid-config.tar"* ]]
+ }
